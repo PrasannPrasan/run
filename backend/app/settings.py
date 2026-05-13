@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     jwt_issuer: str = "lead-enrichment"
     jwt_audience: str = "lead-enrichment-ui"
     jwt_access_token_minutes: int = 120
+    admin_emails: str = ""
 
     redis_url: str = "redis://localhost:6379/0"
 

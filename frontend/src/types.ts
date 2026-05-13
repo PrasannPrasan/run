@@ -60,3 +60,38 @@ export type ProviderStrategy = {
   freeTierPlan: string[];
   complianceNote: string;
 };
+
+export type AdminProviderStatus = {
+  provider: string;
+  enabled: boolean;
+  successes: number;
+  failures: number;
+  latestError?: string | null;
+};
+
+export type AdminUser = {
+  id: number;
+  email: string;
+  createdAt?: string | null;
+  lookupCount: number;
+};
+
+export type AdminLookup = {
+  id: number;
+  userEmail?: string | null;
+  linkedinUrl: string;
+  status: string;
+  errorMessage?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  totalCostUsd: number;
+  costs: LookupResult["costs"];
+  providerCalls: NonNullable<LookupResult["providerCalls"]>;
+};
+
+export type AdminOverview = {
+  admin: AuthUser;
+  users: AdminUser[];
+  lookups: AdminLookup[];
+  providerStatus: AdminProviderStatus[];
+};

@@ -440,6 +440,99 @@ p {
   box-shadow: 0 12px 30px rgba(37, 99, 235, 0.1);
 }
 
+.admin-page .summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.admin-table,
+.admin-lookup-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 100px minmax(180px, 0.8fr);
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 11px;
+  background: #ffffff;
+  color: #334155;
+}
+
+.admin-row-head {
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.admin-lookup {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.admin-lookup-main,
+.admin-lookup-meta,
+.admin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-lookup-main strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.admin-lookup-main small,
+.admin-lookup-meta {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.admin-lookup-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.admin-actions {
+  justify-content: flex-end;
+}
+
+.danger-button {
+  min-height: 38px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 9px 14px;
+  background: #fef2f2;
+  color: #b91c1c;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.danger-button:disabled,
+.ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.provider-diagnostics.compact {
+  margin-top: 0;
+}
+
 .provider-topline {
   justify-content: space-between;
   gap: 10px;
@@ -766,10 +859,18 @@ p {
   }
 
   .summary-grid,
+  .admin-page .summary-grid,
   .field-grid,
   .cost-metrics,
-  .lookup-form {
+  .lookup-form,
+  .admin-row {
     grid-template-columns: 1fr;
+  }
+
+  .admin-lookup-main,
+  .admin-actions {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .lookup-form .primary-button {

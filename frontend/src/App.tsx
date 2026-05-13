@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { enrich, getLookup, getStrategy, isAuthError, listLookups, login, register } from "./api";
+import { AdminPanel } from "./components/AdminPanel";
 import { CostPanel } from "./components/CostPanel";
 import { EnrichForm } from "./components/EnrichForm";
 import { ResultsPanel } from "./components/ResultsPanel";
@@ -37,6 +38,9 @@ function Shell({
                 <span className="status-dot" />
                 {email}
               </span>
+              <Link to="/admin" className="nav-link">
+                Admin
+              </Link>
               <button className="ghost-button" type="button" onClick={onLogout}>
                 Logout
               </button>
@@ -370,6 +374,14 @@ export default function App() {
                 setNotice(null);
               }}
             />
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <Guard token={auth.token}>
+              <AdminPanel token={auth.token!} onAuthExpired={handleAuthExpired} />
+            </Guard>
           }
         />
       </Routes>

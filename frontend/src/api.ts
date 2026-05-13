@@ -1,4 +1,4 @@
-import type { LookupResult, ProviderStrategy, TokenResponse } from "./types";
+import type { AdminOverview, LookupResult, ProviderStrategy, TokenResponse } from "./types";
 
 const configuredBase = import.meta.env.VITE_API_BASE_URL || "";
 const isLoopbackBase = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(configuredBase);
@@ -85,4 +85,30 @@ export async function getStrategy(token: string): Promise<ProviderStrategy> {
     headers: { Authorization: `Bearer ${token}` },
   });
   return readJson<ProviderStrategy>(res);
+}
+
+export async function getAdminOverview(token: string): Promise<AdminOverview> {
+  const res = await fetch(`${BASE}/api/admin/overview`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson<AdminOverview>(res);
+}
+
+export async function deleteAdminLookup(lookupId: number, token: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`${BASE}/api/admin/lookups/${lookupId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson<{ ok: boolean }>(res);
+}
+
+export async function resetAdminLookup(
+  lookupId: number,
+  token: string,
+): Promise<{ lookupId: number; status: string }> {
+  const res = await fetch(`${BASE}/api/admin/lookups/${lookupId}/reset`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return readJson<{ lookupId: number; status: string }>(res);
 }
