@@ -141,6 +141,13 @@ class ApifyProviderClient:
                 data = items_resp.json() or []
                 items = [item for item in data if isinstance(item, dict)]
 
+        if run.get("status") in {"FAILED", "ABORTED", "TIMED-OUT"}:
+            raise RuntimeError(f"Apify actor run ended with status {run.get('status')}")
+        if not items:
+            raise RuntimeError(
+                "Apify returned no profile items; the actor likely hit LinkedIn auth wall or received an empty profile"
+            )
+
         item = items[0] if items else {}
         profiles = _profiles(item)
 

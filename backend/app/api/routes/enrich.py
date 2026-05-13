@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user
 from app.db.models import (
     EnrichedFieldValue,
+    FieldKey,
     FieldSource,
     Lookup,
     LookupCost,
@@ -164,6 +166,117 @@ def _serialize_lookup(lookup: Lookup, db: Session) -> dict:
     }
 
 
+def _is_meaningful_value(key: FieldKey, value: object) -> bool:
+    if key == FieldKey.total_years_experience:
+        return False
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_is_meaningful_value(key, item) for item in value)
+    return True
+
+
+def _lookup_has_data(lookup: Lookup, db: Session) -> bool:
+    if db.query(WorkHistoryEvent).filter_by(lookup_id=lookup.id).first():
+        return True
+    fields = db.query(EnrichedFieldValue).filter_by(lookup_id=lookup.id).all()
+    for field in fields:
+        try:
+            value = json.loads(field.value_json)
+        except json.JSONDecodeError:
+            value = field.value_json
+        if _is_meaningful_value(field.key, value):
+            return True
+    return False
+
+
+def _delete_lookup_results(db: Session, lookup_id: int) -> None:
+    field_ids = [row.id for row in db.query(EnrichedFieldValue.id).filter_by(lookup_id=lookup_id).all()]
+    if field_ids:
+        db.query(FieldSource).filter(FieldSource.field_value_id.in_(field_ids)).delete(synchronize_session=False)
+    db.query(EnrichedFieldValue).filter_by(lookup_id=lookup_id).delete()
+    db.query(WorkHistoryEvent).filter_by(lookup_id=lookup_id).delete()
+    db.query(ProviderCall).filter_by(lookup_id=lookup_id).delete()
+    db.query(LookupCost).filter_by(lookup_id=lookup_id).delete()
+
+
+def _copy_lookup_results(source: Lookup, target: Lookup, db: Session) -> None:
+    _delete_lookup_results(db, target.id)
+    field_id_map: dict[int, EnrichedFieldValue] = {}
+    for field in db.query(EnrichedFieldValue).filter_by(lookup_id=source.id).all():
+        copied = EnrichedFieldValue(
+            lookup_id=target.id,
+            key=field.key,
+            value_json=field.value_json,
+            confidence=field.confidence,
+        )
+        db.add(copied)
+        db.flush()
+        field_id_map[field.id] = copied
+
+    if field_id_map:
+        sources = (
+            db.query(FieldSource)
+            .filter(FieldSource.field_value_id.in_(list(field_id_map.keys())))
+            .all()
+        )
+        for source_entry in sources:
+            db.add(
+                FieldSource(
+                    field_value_id=field_id_map[source_entry.field_value_id].id,
+                    provider=source_entry.provider,
+                    provider_ref=source_entry.provider_ref,
+                    raw_path=source_entry.raw_path,
+                    note=source_entry.note,
+                )
+            )
+
+    for item in db.query(WorkHistoryEvent).filter_by(lookup_id=source.id).all():
+        db.add(
+            WorkHistoryEvent(
+                lookup_id=target.id,
+                company=item.company,
+                title=item.title,
+                start_date=item.start_date,
+                end_date=item.end_date,
+                is_current=item.is_current,
+                confidence=item.confidence,
+                provider=item.provider,
+                provider_ref=item.provider_ref,
+            )
+        )
+
+    db.add(
+        LookupCost(
+            lookup_id=target.id,
+            provider="cache",
+            cost_usd=0.0,
+            cost_units=0.0,
+            unit_name="lookup",
+            is_estimated=False,
+            note=f"Reused local enriched profile from lookup {source.id}",
+        )
+    )
+    db.add(
+        ProviderCall(
+            lookup_id=target.id,
+            provider="cache",
+            stage="reuse",
+            request_meta_json=json.dumps({"sourceLookupId": source.id}),
+            response_meta_json=json.dumps({"status": "reused", "sourceLookupId": source.id}),
+            provider_ref=str(source.id),
+            success=True,
+            finished_at=dt.datetime.now(dt.UTC),
+        )
+    )
+    target.status = source.status
+    target.error_message = None
+    db.add(target)
+    db.commit()
+
+
 @router.post("", response_model=EnrichResponse)
 def enrich(
     body: EnrichRequest,
@@ -173,19 +286,49 @@ def enrich(
     normalized = canonicalize_linkedin_url(body.linkedinUrl)
     p_hash = profile_hash(normalized)
 
-    existing = (
+    existing_for_user = (
         db.query(Lookup)
-        .filter(Lookup.user_id == user.id, Lookup.profile_hash == p_hash, Lookup.status.in_([LookupStatus.complete, LookupStatus.partial]))
+        .filter(Lookup.user_id == user.id, Lookup.profile_hash == p_hash)
         .order_by(Lookup.id.desc())
         .first()
     )
-    if existing:
-        return EnrichResponse(lookupId=existing.id, status=existing.status.value)
+    if existing_for_user and existing_for_user.status in {LookupStatus.complete, LookupStatus.partial}:
+        if _lookup_has_data(existing_for_user, db):
+            return EnrichResponse(lookupId=existing_for_user.id, status=existing_for_user.status.value)
 
-    lookup = Lookup(user_id=user.id, linkedin_url=normalized, profile_hash=p_hash, status=LookupStatus.queued)
-    db.add(lookup)
-    db.commit()
-    db.refresh(lookup)
+    cached = (
+        db.query(Lookup)
+        .filter(
+            Lookup.profile_hash == p_hash,
+            Lookup.id != (existing_for_user.id if existing_for_user else 0),
+            Lookup.status.in_([LookupStatus.complete, LookupStatus.partial]),
+        )
+        .order_by(Lookup.updated_at.desc(), Lookup.id.desc())
+        .all()
+    )
+    cached_with_data = next((lookup for lookup in cached if _lookup_has_data(lookup, db)), None)
+    if cached_with_data:
+        target = existing_for_user
+        if not target:
+            target = Lookup(user_id=user.id, linkedin_url=normalized, profile_hash=p_hash, status=LookupStatus.queued)
+            db.add(target)
+            db.commit()
+            db.refresh(target)
+        _copy_lookup_results(cached_with_data, target, db)
+        return EnrichResponse(lookupId=target.id, status=target.status.value)
+
+    if existing_for_user:
+        lookup = existing_for_user
+        _delete_lookup_results(db, lookup.id)
+        lookup.status = LookupStatus.queued
+        lookup.error_message = None
+        db.add(lookup)
+        db.commit()
+    else:
+        lookup = Lookup(user_id=user.id, linkedin_url=normalized, profile_hash=p_hash, status=LookupStatus.queued)
+        db.add(lookup)
+        db.commit()
+        db.refresh(lookup)
 
     queued = enqueue_lookup(lookup.id)
     if not queued:
