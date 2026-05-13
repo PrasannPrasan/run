@@ -4,7 +4,8 @@ import type { AdminOverview } from "../types";
 
 function trimError(message?: string | null) {
   if (!message) return "-";
-  return message.split("\n")[0];
+  const firstLine = message.split("\n")[0];
+  return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine;
 }
 
 function formatDate(value?: string | null) {
@@ -117,7 +118,7 @@ export function AdminPanel({
                 </span>
               </div>
               <p>
-                Successes {provider.successes} - Failures {provider.failures}
+                Logged calls: {provider.successes} returned - {provider.failures} missed
               </p>
               <small>{trimError(provider.latestError)}</small>
             </article>
