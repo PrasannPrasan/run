@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from urllib.parse import quote
 
 from app.services.providers.http import client
@@ -7,23 +8,83 @@ from app.services.providers.types import ProviderResult
 from app.settings import settings
 
 
+def _text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("name", "title", "text", "value"):
+            text = _text(value.get(key))
+            if text:
+                return text
+    return None
+
+
 def _first_text(*values: object) -> str | None:
     for value in values:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+        text = _text(value)
+        if text:
+            return text
+    return None
+
+
+def _first_list(*values: object) -> list[dict]:
+    for value in values:
+        if isinstance(value, dict):
+            return [value]
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _profiles(item: dict) -> list[dict]:
+    profiles = [item]
+    for key in ("profile", "data", "result", "person"):
+        nested = item.get(key)
+        if isinstance(nested, dict):
+            profiles.append(nested)
+    return profiles
+
+
+def _from_profiles(profiles: list[dict], *keys: str) -> str | None:
+    for profile in profiles:
+        for key in keys:
+            text = _text(profile.get(key))
+            if text:
+                return text
     return None
 
 
 def _split_date_range(value: object) -> tuple[str | None, str | None, bool]:
-    if not isinstance(value, str) or not value.strip():
+    text = _text(value)
+    if not text:
         return None, None, False
-    text = value.strip()
-    for sep in [" - ", " – ", " — ", "-", "–", "—"]:
+    for sep in (" - ", " -", "- ", "-"):
         if sep in text:
             left, right = text.split(sep, 1)
             end = right.strip() or None
             return left.strip() or None, end, bool(end and end.lower() == "present")
     return text, None, False
+
+
+def _collect_contact_strings(*values: object) -> list[str]:
+    output: list[str] = []
+    for value in values:
+        text = _text(value)
+        if text:
+            output.append(text)
+            continue
+        if isinstance(value, list):
+            for item in value:
+                text = _text(item)
+                if text:
+                    output.append(text)
+                elif isinstance(item, dict):
+                    for key in ("email", "address", "value", "number", "phone"):
+                        nested_text = _text(item.get(key))
+                        if nested_text:
+                            output.append(nested_text)
+                            break
+    return output
 
 
 class ApifyProviderClient:
@@ -35,24 +96,40 @@ class ApifyProviderClient:
         self.actor_id = quote(settings.apify_actor_id.replace("/", "~"), safe="")
 
     def enrich(self, linkedin_url: str) -> ProviderResult:
-        # Runs an actor and waits for finish. Uses actor id like `anchor~linkedin-profile-enrichment`.
-        # Apify API: POST /v2/acts/{actorId}/runs?waitForFinish=...
-        with client(timeout_s=120.0) as c:
+        # Runs an actor and waits for finish. Uses actor id like `scrapemint~linkedin-profile-scraper`.
+        with client(timeout_s=180.0) as c:
             run_resp = c.post(
                 f"https://api.apify.com/v2/acts/{self.actor_id}/runs",
                 params={"token": settings.apify_token, "waitForFinish": 120},
                 json={
-                    "startUrls": [{"url": linkedin_url}],
-                    # Kept for compatibility with other configured LinkedIn profile actors.
                     "profileUrls": [linkedin_url],
+                    "startUrls": [{"url": linkedin_url}],
+                    "includeExperience": True,
+                    "includeEducation": True,
+                    "includeSkills": True,
                 },
             )
             run_resp.raise_for_status()
             run = run_resp.json().get("data") or {}
 
-            dataset_id = run.get("defaultDatasetId")
             run_id = run.get("id")
             usage_usd = run.get("usageTotalUsd") or run.get("usageUsd")
+            dataset_id = run.get("defaultDatasetId")
+
+            for _ in range(12):
+                if run.get("status") in {"SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"}:
+                    break
+                if not run_id:
+                    break
+                time.sleep(5)
+                run_state = c.get(
+                    f"https://api.apify.com/v2/actor-runs/{run_id}",
+                    params={"token": settings.apify_token},
+                )
+                run_state.raise_for_status()
+                run = run_state.json().get("data") or run
+                dataset_id = run.get("defaultDatasetId") or dataset_id
+                usage_usd = run.get("usageTotalUsd") or run.get("usageUsd") or usage_usd
 
             items: list[dict] = []
             if dataset_id:
@@ -61,54 +138,88 @@ class ApifyProviderClient:
                     params={"token": settings.apify_token, "clean": "true", "format": "json"},
                 )
                 items_resp.raise_for_status()
-                items = items_resp.json() or []
+                data = items_resp.json() or []
+                items = [item for item in data if isinstance(item, dict)]
 
         item = items[0] if items else {}
+        profiles = _profiles(item)
 
-        full_name = _first_text(item.get("fullName"), item.get("full_name"), item.get("name"))
-        current_company = _first_text(
-            item.get("currentCompany"),
-            item.get("currentCompanyName"),
-            item.get("companyName"),
-            item.get("company"),
+        full_name = _from_profiles(
+            profiles,
+            "fullName",
+            "full_name",
+            "profileName",
+            "profile_name",
+            "name",
+            "publicIdentifier",
         )
-        current_designation = _first_text(
-            item.get("currentTitle"),
-            item.get("currentJobTitle"),
-            item.get("currentDesignation"),
-            item.get("jobTitle"),
-            item.get("title"),
+        if not full_name:
+            first = _from_profiles(profiles, "firstName", "first_name")
+            last = _from_profiles(profiles, "lastName", "last_name")
+            full_name = f"{first} {last}".strip() if first or last else None
+
+        current_company = _from_profiles(
+            profiles,
+            "currentCompany",
+            "currentCompanyName",
+            "current_company",
+            "companyName",
+            "company_name",
+            "company",
+        )
+        current_designation = _from_profiles(
+            profiles,
+            "currentTitle",
+            "currentJobTitle",
+            "currentDesignation",
+            "current_title",
+            "current_job_title",
+            "jobTitle",
+            "job_title",
+            "title",
         )
 
-        # Common shapes across actors
-        headline = item.get("headline") or item.get("subtitle")
-        if isinstance(headline, str) and " at " in headline:
+        headline = _from_profiles(profiles, "headline", "subtitle", "occupation")
+        if headline and " at " in headline:
             current_designation, current_company = headline.split(" at ", 1)
 
-        emails = []
-        for v in [item.get("email"), item.get("emails"), item.get("emailAddress")]:
-            if isinstance(v, str) and v:
-                emails.append(v)
-            elif isinstance(v, list):
-                emails.extend([x for x in v if isinstance(x, str)])
+        emails = _collect_contact_strings(
+            *[profile.get("email") for profile in profiles],
+            *[profile.get("emails") for profile in profiles],
+            *[profile.get("emailAddress") for profile in profiles],
+        )
+        phones = _collect_contact_strings(
+            *[profile.get("phone") for profile in profiles],
+            *[profile.get("phones") for profile in profiles],
+            *[profile.get("phoneNumbers") for profile in profiles],
+        )
 
         work_history = None
-        exp = item.get("experience") or item.get("experiences") or item.get("positions")
-        if isinstance(exp, list):
+        exp: list[dict] = []
+        for profile in profiles:
+            exp = _first_list(
+                profile.get("experience"),
+                profile.get("experiences"),
+                profile.get("positions"),
+                profile.get("topExperience"),
+                profile.get("top_experience"),
+            )
+            if exp:
+                break
+
+        if exp:
             work_history = []
-            for e in exp:
-                if not isinstance(e, dict):
-                    continue
-                company = _first_text(e.get("companyName"), e.get("company"), e.get("organization"))
-                title = _first_text(e.get("title"), e.get("position"), e.get("role"))
-                start = _first_text(e.get("startDate"), e.get("start"), e.get("start_date"))
-                end = _first_text(e.get("endDate"), e.get("end"), e.get("end_date"))
+            for entry in exp:
+                company = _first_text(entry.get("companyName"), entry.get("company"), entry.get("organization"))
+                title = _first_text(entry.get("title"), entry.get("position"), entry.get("role"))
+                start = _first_text(entry.get("startDate"), entry.get("start"), entry.get("start_date"))
+                end = _first_text(entry.get("endDate"), entry.get("end"), entry.get("end_date"))
                 range_start, range_end, range_current = _split_date_range(
-                    e.get("dateRange") or e.get("date_range") or e.get("period")
+                    entry.get("dateRange") or entry.get("date_range") or entry.get("period") or entry.get("duration")
                 )
                 start = start or range_start
                 end = end or range_end
-                is_current = bool(e.get("isCurrent") or e.get("current") or range_current)
+                is_current = bool(entry.get("isCurrent") or entry.get("current") or range_current)
                 if is_current:
                     current_company = current_company or company
                     current_designation = current_designation or title
@@ -128,8 +239,8 @@ class ApifyProviderClient:
             full_name=full_name,
             current_company=current_company,
             current_designation=current_designation,
-            emails=sorted({e.strip() for e in emails if isinstance(e, str) and e.strip()}) or None,
-            phones=None,
+            emails=sorted({email.strip() for email in emails if email.strip()}) or None,
+            phones=sorted({phone.strip() for phone in phones if phone.strip()}) or None,
             work_history=work_history,
             raw=item if item else None,
             cost_usd=float(usage_usd) if usage_usd is not None else None,

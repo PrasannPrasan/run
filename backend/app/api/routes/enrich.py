@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user
 from app.db.models import EnrichedFieldValue, FieldSource, Lookup, LookupCost, LookupStatus, User, WorkHistoryEvent
 from app.db.session import get_db
-from app.services.enrichment.jobs import enqueue_lookup, run_lookup_job
+from app.services.enrichment.jobs import enqueue_lookup, run_lookup_job_in_thread
 from app.services.enrichment.utils import canonicalize_linkedin_url, profile_hash
 from app.settings import settings
 
@@ -163,9 +163,9 @@ def enrich(
 
     queued = enqueue_lookup(lookup.id)
     if not queued:
-        # Fallback to sync mode if Redis is unavailable.
-        run_lookup_job(lookup.id)
-        db.refresh(lookup)
+        # Fallback to an in-process worker when Redis is unavailable.
+        # This keeps hosted/tunneled HTTP requests short while the UI polls.
+        run_lookup_job_in_thread(lookup.id)
 
     return EnrichResponse(lookupId=lookup.id, status=lookup.status.value)
 

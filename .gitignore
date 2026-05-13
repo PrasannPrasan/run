@@ -33,3 +33,5 @@ yarn-error.log*
 pnpm-debug.log*
 
 .vercel
+local-prod.log
+local-tunnel.log
