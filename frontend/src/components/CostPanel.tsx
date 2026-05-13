@@ -1,40 +1,53 @@
 import type { LookupResult } from "../types";
 
 export function CostPanel({ result }: { result: LookupResult | null }) {
-  if (!result) return null;
   const successful = Boolean(
-    (result.fields.emails?.value && Array.isArray(result.fields.emails.value) && result.fields.emails.value.length) ||
-      (result.fields.phones?.value && Array.isArray(result.fields.phones.value) && result.fields.phones.value.length),
+    result &&
+      ((Array.isArray(result.fields.emails?.value) && result.fields.emails.value.length) ||
+        (Array.isArray(result.fields.phones?.value) && result.fields.phones.value.length)),
   );
-
-  const totalUsd = result.costs.reduce((sum, c) => sum + (c.costUsd || 0), 0);
+  const totalUsd = result?.costs.reduce((sum, c) => sum + (c.costUsd || 0), 0) ?? 0;
   const perSuccess = successful ? totalUsd : null;
 
   return (
-    <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, background: "#ffffff" }}>
-      <h3 style={{ margin: "0 0 8px" }}>Cost tracking</h3>
-      <div style={{ color: "#374151", marginBottom: 8 }}>
-        Total USD: <strong>{totalUsd.toFixed(4)}</strong>
-        {" | "}
-        Cost per successful contact: <strong>{perSuccess == null ? "-" : perSuccess.toFixed(4)}</strong>
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <span className="eyebrow">Spend</span>
+          <h2>Cost tracking</h2>
+        </div>
+        <span className="count-pill">${totalUsd.toFixed(4)}</span>
       </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        {result.costs.length ? (
-          result.costs.map((c, i) => (
-            <div key={`${c.provider}-${i}`} style={{ border: "1px solid #f3f4f6", borderRadius: 8, padding: 8 }}>
-              <div style={{ fontWeight: 600 }}>{c.provider}</div>
-              <div style={{ fontSize: 13, color: "#4b5563" }}>
-                usd={c.costUsd ?? "-"}, units={c.costUnits ?? "-"} {c.unitName || ""}
+      <div className="cost-metrics">
+        <div>
+          <span>Total USD</span>
+          <strong>${totalUsd.toFixed(4)}</strong>
+        </div>
+        <div>
+          <span>Per successful contact</span>
+          <strong>{perSuccess == null ? "-" : `$${perSuccess.toFixed(4)}`}</strong>
+        </div>
+      </div>
+      <div className="cost-list">
+        {result?.costs.length ? (
+          result.costs.map((cost, index) => (
+            <article className="cost-item" key={`${cost.provider}-${index}`}>
+              <div>
+                <strong>{cost.provider}</strong>
+                <small>
+                  {cost.isEstimated ? "Estimated" : "Exact"} {cost.note ? `- ${cost.note}` : ""}
+                </small>
               </div>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>
-                {c.isEstimated ? "estimated" : "exact"}{c.note ? ` - ${c.note}` : ""}
-              </div>
-            </div>
+              <span>
+                {cost.costUsd == null ? "-" : `$${cost.costUsd.toFixed(4)}`}
+                {cost.costUnits ? ` - ${cost.costUnits} ${cost.unitName || "units"}` : ""}
+              </span>
+            </article>
           ))
         ) : (
-          <div style={{ color: "#6b7280" }}>No cost records yet.</div>
+          <div className="empty-state">Cost entries will appear after a lookup runs.</div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

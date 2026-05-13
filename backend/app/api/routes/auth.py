@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from app.auth.security import create_access_token, hash_password, verify_password
+from app.auth.security import TOKEN_RECREATED_PASSWORD_HASH, create_access_token, hash_password, verify_password
 from app.db.models import User
 from app.db.session import get_db
 
@@ -32,7 +32,14 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     email = body.email.lower().strip()
     existing = db.query(User).filter(User.email == email).one_or_none()
     if existing:
-        raise HTTPException(status_code=409, detail="Email already registered")
+        if existing.password_hash != TOKEN_RECREATED_PASSWORD_HASH:
+            raise HTTPException(status_code=409, detail="Email already registered")
+        existing.password_hash = hash_password(body.password)
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        token = create_access_token(user_id=existing.id, email=existing.email)
+        return TokenResponse(access_token=token, user=AuthUser(id=existing.id, email=existing.email))
 
     user = User(email=email, password_hash=hash_password(body.password))
     db.add(user)
@@ -47,9 +54,14 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     email = form.username.lower().strip()
     user = db.query(User).filter(User.email == email).one_or_none()
+    if user and user.password_hash == TOKEN_RECREATED_PASSWORD_HASH:
+        user.password_hash = hash_password(form.password)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
     if not user or not verify_password(form.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     token = create_access_token(user_id=user.id, email=user.email)
     return TokenResponse(access_token=token, user=AuthUser(id=user.id, email=user.email))
-

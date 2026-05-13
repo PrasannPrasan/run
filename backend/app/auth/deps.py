@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose.exceptions import JWTError
 from sqlalchemy.orm import Session
 
-from app.auth.security import decode_access_token
+from app.auth.security import TOKEN_RECREATED_PASSWORD_HASH, decode_access_token
 from app.db.models import User
 from app.db.session import get_db
 
@@ -17,23 +17,33 @@ def get_current_user(
 ) -> User:
     try:
         payload = decode_access_token(token)
-        user_id = int(payload["sub"])
+        raw_sub = str(payload.get("sub") or "")
         email = str(payload.get("email") or "").lower().strip()
     except (KeyError, ValueError, JWTError):
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = db.query(User).filter(User.id == user_id).one_or_none()
-    if user and email and user.email != email:
-        user = None
-    if not user and email:
+    if not email and "@" in raw_sub:
+        email = raw_sub.lower().strip()
+
+    if email:
         user = db.query(User).filter(User.email == email).one_or_none()
-    if not user and email:
+        if user:
+            return user
+
         # Vercel's demo SQLite database lives in ephemeral serverless storage.
-        # A valid token can outlive the local row, so recreate the identity.
-        user = User(email=email, password_hash="token-recreated-serverless-user")
+        # A valid JWT can outlive the local row, so recreate the identity.
+        user = User(email=email, password_hash=TOKEN_RECREATED_PASSWORD_HASH)
         db.add(user)
         db.commit()
         db.refresh(user)
+        return user
+
+    try:
+        user_id = int(raw_sub)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = db.query(User).filter(User.id == user_id).one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
