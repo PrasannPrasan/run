@@ -64,8 +64,14 @@ def _provider_strategy() -> dict:
                 "name": "apollo",
                 "stage": "email_and_employment_fallback",
                 "enabled": bool(settings.apollo_api_key),
-                "bestFor": "Verified email, company/title fallback, employment history, and optional async phone reveal.",
-                "costModel": "Plan-dependent Apollo credits for people match/enrichment and phone/email reveal.",
+                "bestFor": (
+                    "Verified email, company/title fallback, employment history, and optional async phone reveal. "
+                    "If People Enrichment is blocked by the Apollo plan, the app falls back to existing Apollo contacts."
+                ),
+                "costModel": (
+                    "Plan-dependent Apollo credits for people match/enrichment and phone/email reveal; "
+                    "existing contacts search is treated as a zero-credit fallback."
+                ),
                 "sourceUrl": "https://docs.apollo.io/docs/api-pricing",
             },
             {
