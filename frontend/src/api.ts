@@ -1,6 +1,10 @@
 import type { LookupResult, ProviderStrategy, TokenResponse } from "./types";
 
-const BASE = import.meta.env.VITE_API_BASE_URL || "";
+const configuredBase = import.meta.env.VITE_API_BASE_URL || "";
+const isLoopbackBase = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(configuredBase);
+const isLoopbackPage =
+  typeof window !== "undefined" && /^(127\.0\.0\.1|localhost)$/.test(window.location.hostname);
+const BASE = isLoopbackBase && !isLoopbackPage ? "" : configuredBase;
 
 export class ApiError extends Error {
   status: number;
