@@ -37,6 +37,13 @@ export type LookupResult = {
     isEstimated: boolean;
     note?: string | null;
   }>;
+  providerCalls?: Array<{
+    provider: string;
+    stage: string;
+    success: boolean;
+    errorMessage?: string | null;
+    providerRef?: string | null;
+  }>;
 };
 
 export type ProviderStrategy = {

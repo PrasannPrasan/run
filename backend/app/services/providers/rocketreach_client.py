@@ -34,12 +34,14 @@ class RocketReachProviderClient:
 
         person = data.get("person") or data
         full_name = person.get("name")
-        current_company = None
+        current_company = person.get("current_company") or person.get("current_company_name")
         current_designation = person.get("current_title")
 
         current_employer = person.get("current_employer") or {}
         if isinstance(current_employer, dict):
-            current_company = current_employer.get("name")
+            current_company = current_company or current_employer.get("name")
+        elif isinstance(current_employer, str):
+            current_company = current_company or current_employer.strip() or None
 
         emails: list[str] = []
         for e in (person.get("emails") or []):
@@ -68,7 +70,13 @@ class RocketReachProviderClient:
                     continue
                 work_history.append(
                     {
-                        "company": (j.get("organization") or {}).get("name") if isinstance(j.get("organization"), dict) else j.get("organization"),
+                        "company": (
+                            (j.get("organization") or {}).get("name")
+                            if isinstance(j.get("organization"), dict)
+                            else j.get("organization")
+                        )
+                        or j.get("company_name")
+                        or j.get("company"),
                         "title": j.get("title"),
                         "start": j.get("start_date") or j.get("start"),
                         "end": j.get("end_date") or j.get("end"),

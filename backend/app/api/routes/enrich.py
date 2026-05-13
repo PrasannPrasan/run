@@ -7,7 +7,16 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user
-from app.db.models import EnrichedFieldValue, FieldSource, Lookup, LookupCost, LookupStatus, User, WorkHistoryEvent
+from app.db.models import (
+    EnrichedFieldValue,
+    FieldSource,
+    Lookup,
+    LookupCost,
+    LookupStatus,
+    ProviderCall,
+    User,
+    WorkHistoryEvent,
+)
 from app.db.session import get_db
 from app.services.enrichment.jobs import enqueue_lookup, run_lookup_job_in_thread
 from app.services.enrichment.utils import canonicalize_linkedin_url, profile_hash
@@ -106,6 +115,7 @@ def _serialize_lookup(lookup: Lookup, db: Session) -> dict:
 
     history = db.query(WorkHistoryEvent).filter_by(lookup_id=lookup.id).order_by(WorkHistoryEvent.id.asc()).all()
     costs = db.query(LookupCost).filter_by(lookup_id=lookup.id).all()
+    provider_calls = db.query(ProviderCall).filter_by(lookup_id=lookup.id).order_by(ProviderCall.id.asc()).all()
 
     return {
         "id": lookup.id,
@@ -134,6 +144,16 @@ def _serialize_lookup(lookup: Lookup, db: Session) -> dict:
                 "note": c.note,
             }
             for c in costs
+        ],
+        "providerCalls": [
+            {
+                "provider": call.provider,
+                "stage": call.stage,
+                "success": call.success,
+                "errorMessage": call.error_message,
+                "providerRef": call.provider_ref,
+            }
+            for call in provider_calls
         ],
     }
 

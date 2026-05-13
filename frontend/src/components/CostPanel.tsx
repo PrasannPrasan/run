@@ -48,6 +48,23 @@ export function CostPanel({ result }: { result: LookupResult | null }) {
           <div className="empty-state">Cost entries will appear after a lookup runs.</div>
         )}
       </div>
+      {result?.providerCalls?.length ? (
+        <div className="provider-diagnostics">
+          <h3>Provider diagnostics</h3>
+          {result.providerCalls.map((call, index) => (
+            <article className="diagnostic-item" key={`${call.provider}-${call.stage}-${index}`}>
+              <div>
+                <strong>{call.provider}</strong>
+                <small>{call.stage}</small>
+              </div>
+              <span className={call.success ? "provider-state enabled" : "provider-state missing"}>
+                {call.success ? "returned" : "missed"}
+              </span>
+              {call.errorMessage ? <p>{call.errorMessage.split("\n")[0]}</p> : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
